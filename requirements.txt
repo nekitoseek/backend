@@ -1,3 +1,4 @@
+# зависимости
 fastapi
 uvicorn
 sqlalchemy[asyncio]
