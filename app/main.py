@@ -2,13 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app import crud, schemas
 from app.database import get_db
-from app.schemas import QueueCreate, QueueOut, UserOut
+from app.schemas import QueueCreate, QueueOut, UserOut, NotificationOut
 from app.crud import create_queue, get_queues
 from app import auth
 from app.schemas import UserLogin, Token
-from app.models import User
+from app.models import User, Notification
 from app.auth import get_current_user
 from typing import List, Optional
 
@@ -148,6 +149,7 @@ async def call_next_student_route(
     return await crud.call_next_student(db, queue_id, current_user.id)
 
 
+# завершение очереди
 @app.post("/queues/{queue_id}/close")
 async def close_queue_route(
         queue_id: int,
@@ -158,3 +160,27 @@ async def close_queue_route(
         raise HTTPException(status_code=403, detail="Только преподаватели могут закрывать очередь")
 
     return await crud.close_queue(db, queue_id, current_user.id)
+
+
+# завершение сдачи
+@app.post("/queues/{queue_id}/complete")
+async def complete_student_route(
+        queue_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Только преподаватели могут завершать вызов")
+    return await crud.complete_current_student(db, queue_id, current_user.id)
+
+
+# уведомления
+@app.get("/notifications", response_model=List[NotificationOut])
+async def get_my_notifications(
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    result = await db.execute(
+        select(Notification).where(Notification.user_id == current_user.id)
+    )
+    return result.scalars().all()

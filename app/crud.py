@@ -2,8 +2,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
-from sqlalchemy import delete, func
-from app.models import User, Queue, QueueGroup, QueueParticipant
+from sqlalchemy import delete, func, update, select
+from app.models import User, Queue, QueueGroup, QueueParticipant, Notification
 from app import schemas
 from app.schemas import UserCreate
 from passlib.hash import bcrypt
@@ -136,6 +136,7 @@ async def get_students_in_queue(db: AsyncSession, queue_id: int):
         select(User)
         .join(QueueParticipant, QueueParticipant.student_id == User.id)
         .where(QueueParticipant.queue_id == queue_id)
+        .order_by(QueueParticipant.position)
     )
     return result.scalars().all()
 
@@ -191,6 +192,7 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
         raise HTTPException(status_code=404, detail="Вы не стоите в этой очереди")
 
     participant.status = "left"
+    await send_notification(db, participant.student_id, "Вы покинули очередь")
     await db.commit()
     return {"detail": "Вы покинули очередь"}
 
@@ -198,8 +200,9 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
 # вызов следующего по очереди
 async def call_next_student(db: AsyncSession, queue_id: int, teacher_id: int):
     result = await db.execute(
-        select(Queue).where(Queue.queue_id == queue_id, Queue.teacher_id == teacher_id)
+        select(Queue).where(Queue.id == queue_id, Queue.teacher_id == teacher_id)
     )
+    queue = result.scalars().first()
     if not queue:
         raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
 
@@ -213,6 +216,7 @@ async def call_next_student(db: AsyncSession, queue_id: int, teacher_id: int):
 
     participant.status = "called"
     await db.commit()
+    await send_notification(db, participant.student_id, "Вы вызваны в очереди")
     return {"detail": f"Студент {participant.student_id} вызван"}
 
 
@@ -232,5 +236,51 @@ async def close_queue(db: AsyncSession, queue_id: int, teacher_id: int):
         .values(status="closed")
     )
 
+    result = await db.execute(
+        select(QueueParticipant).where(QueueParticipant.queue_id == queue_id, QueueParticipant.status == "closed")
+    )
+    participants = result.scalars().first()
+    for participant in participants:
+        await send_notification(db, participant.student_id, "Очередь была закрыта, вы не успели!")
+
     await db.commit()
     return {"detail": "Очередь успешно закрыта"}
+
+
+# сдача завершена
+async def complete_current_student(db: AsyncSession, queue_id: int, teacher_id: int):
+    result = await db.execute(
+        select(Queue).where(Queue.id == queue_id, Queue.teacher_id == teacher_id)
+    )
+    queue = result.scalars().first()
+    if not queue:
+        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
+
+    result = await db.execute(
+        select(QueueParticipant)
+        .where(QueueParticipant.queue_id == queue_id, QueueParticipant.status == "called")
+        .order_by(QueueParticipant.position.asc())
+    )
+    participant = result.scalars().first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Нет вызванного студента")
+    participant.status = "left"
+    await db.commit()
+    return {"detail": f"Студент {participant.student_id} завершил сдачу"}
+
+
+# уведомления
+async def send_notification(db: AsyncSession, user_id: int, message_text: str):
+    notification = Notification(
+        user_id=user_id,
+        message_text=message_text,
+        status="sent"
+    )
+    db.add(notification)
+    await db.commit()
+
+async def get_notifications_for_user(db: AsyncSession, user_id: int):
+    result = await db.execute(
+        select(Notification).where(Notification.user_id == user_id)
+    )
+    return result.scalars().all()

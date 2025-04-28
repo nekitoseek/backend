@@ -67,3 +67,13 @@ class QueueUpdate(BaseModel):
     scheduled_date: Optional[datetime] = None
     discipline_id: Optional[int] = None
     group_ids: Optional[List[int]] = None
+
+
+class NotificationOut(BaseModel):
+    id: int
+    message_text: str
+    sent_at: datetime
+    status: str
+
+    class Config:
+        orm_mode = True
