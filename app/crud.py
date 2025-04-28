@@ -175,3 +175,62 @@ async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
     await db.commit()
     await db.refresh(new_participant)
     return new_participant
+
+
+# покидание очереди
+async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
+    result = await db.execute(
+        select(QueueParticipant).where(
+            QueueParticipant.queue_id == queue_id,
+            QueueParticipant.student_id == student_id,
+            QueueParticipant.status == "waiting"
+        )
+    )
+    participant = result.scalars().first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Вы не стоите в этой очереди")
+
+    participant.status = "left"
+    await db.commit()
+    return {"detail": "Вы покинули очередь"}
+
+
+# вызов следующего по очереди
+async def call_next_student(db: AsyncSession, queue_id: int, teacher_id: int):
+    result = await db.execute(
+        select(Queue).where(Queue.queue_id == queue_id, Queue.teacher_id == teacher_id)
+    )
+    if not queue:
+        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
+
+    result = await db.execute(
+        select(QueueParticipant).where(QueueParticipant.queue_id == queue_id, QueueParticipant.status == "waiting")
+        .order_by(QueueParticipant.position.asc())
+    )
+    participant = result.scalars().first()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Очередь пуста")
+
+    participant.status = "called"
+    await db.commit()
+    return {"detail": f"Студент {participant.student_id} вызван"}
+
+
+# закрытие очереди
+async def close_queue(db: AsyncSession, queue_id: int, teacher_id: int):
+    result = await db.execute(
+        select(Queue).where(Queue.id == queue_id, Queue.teacher_id == teacher_id)
+    )
+    queue = result.scalars().first()
+    if not queue:
+        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
+
+    queue.status = "closed"
+
+    await db.execute(
+        update(QueueParticipant).where(QueueParticipant.queue_id == queue_id, QueueParticipant.status == "waiting")
+        .values(status="closed")
+    )
+
+    await db.commit()
+    return {"detail": "Очередь успешно закрыта"}

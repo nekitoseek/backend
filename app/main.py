@@ -109,3 +109,52 @@ async def get_queue_students(
         current_user: User = Depends(get_current_user)
 ):
     return await crud.get_students_in_queue(db, queue_id)
+
+
+# присоединение к очереди
+@app.post("/queues/{queue_id}/join")
+async def join_queue_route(
+        queue_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Только студенты могут вставать в очереди")
+    return await crud.join_queue(db, queue_id, current_user.id)
+
+
+# покидание очереди
+@app.post("/queues/{queue_id}/leave")
+async def leave_queue_route(
+        queue_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Только студенты могут покидать очередь")
+
+    return await crud.leave_queue(db, queue_id, current_user.id)
+
+
+# вызов следующего
+@app.post("/queues/{queue_id}/call")
+async def call_next_student_route(
+        queue_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Только преподаватели могут вызывать студентов")
+    return await crud.call_next_student(db, queue_id, current_user.id)
+
+
+@app.post("/queues/{queue_id}/close")
+async def close_queue_route(
+        queue_id: int,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "teacher":
+        raise HTTPException(status_code=403, detail="Только преподаватели могут закрывать очередь")
+
+    return await crud.close_queue(db, queue_id, current_user.id)
