@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +7,20 @@ from app import auth, crud, models, schemas, database
 from typing import List, Optional
 
 app = FastAPI()
+
+def verify_admin(current_user: models.User):
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="Нет прав администратора.")
+
+# Разрешаем доступ с фронта
+origins = ["http://localhost:5173"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():
@@ -33,7 +47,7 @@ async def login(
 # api для проверки роли пользователя
 @app.get("/me")
 async def read_current_user(current_user: models.User = Depends(auth.get_current_user)):
-    return {"username": current_user.username, "role": current_user.role}
+    return {"id": current_user.id, "username": current_user.username, "email": current_user.email}
 
 # api создания очереди
 @app.post("/queues", response_model=schemas.QueueOut)
@@ -42,9 +56,7 @@ async def create_queue_route(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    if current_user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Только преподаватели могут создавать очереди")
-    return await crud.create_queue(db, queue, teacher_id=current_user.id)
+    return await crud.create_queue(db, queue, creator_id=current_user.id)
 
 # api просмотр активных очередей
 @app.get("/queues", response_model=List[schemas.QueueOut])
@@ -94,8 +106,6 @@ async def join_queue_route(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    if current_user.role != "student":
-        raise HTTPException(status_code=403, detail="Только студенты могут вставать в очереди")
     return await crud.join_queue(db, queue_id, current_user.id)
 
 # api для покидания очереди
@@ -105,21 +115,8 @@ async def leave_queue_route(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    if current_user.role != "student":
-        raise HTTPException(status_code=403, detail="Только студенты могут покидать очередь")
-
     return await crud.leave_queue(db, queue_id, current_user.id)
 
-# api для вызова следующего
-@app.post("/queues/{queue_id}/call")
-async def call_next_student_route(
-        queue_id: int,
-        db: AsyncSession = Depends(database.get_db),
-        current_user: models.User = Depends(auth.get_current_user)
-):
-    if current_user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Только преподаватели могут вызывать студентов")
-    return await crud.call_next_student(db, queue_id, current_user.id)
 
 # api для закрытия очереди
 @app.post("/queues/{queue_id}/close")
@@ -128,9 +125,6 @@ async def close_queue_route(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    if current_user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Только преподаватели могут закрывать очередь")
-
     return await crud.close_queue(db, queue_id, current_user.id)
 
 # api для завершения сдачи (конкретный студент)
@@ -140,8 +134,6 @@ async def complete_student_route(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    if current_user.role != "teacher":
-        raise HTTPException(status_code=403, detail="Только преподаватели могут завершать вызов")
     return await crud.complete_current_student(db, queue_id, current_user.id)
 
 # api для уведомлений (просто с бд пока что)
@@ -156,13 +148,30 @@ async def get_my_notifications(
     return result.scalars().all()
 
 
+@app.get("/groups")
+async def get_groups(
+        db: AsyncSession = Depends(database.get_db)
+):
+    result = await db.execute(select(models.Group).order_by(models.Group.name))
+    return result.scalars().all()
 
-# Разрешаем доступ с фронта
-# origins = ["http://localhost:5173"]
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=origins,
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+
+
+###### ДЛЯ АДМИНИСТРАТОРА ######
+@app.post("/admin/groups")
+async def add_group_route(
+        name: str = Body(...),
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    return await crud.create_group(db, name)
+
+@app.post("/admin/disciplines")
+async def add_discipline_route(
+        name: str = Body(...),
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    return await crud.create_discipline(db, name)

@@ -22,7 +22,6 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(100), nullable=False)
     email = Column(String(100), unique=True, nullable=False)
-    role = Column(String(10), nullable=False) # 'student' or 'teacher'
     telegram_id = Column(String(100), nullable=True)
     registration_date = Column(TIMESTAMP, default=datetime.utcnow)
 
@@ -35,11 +34,6 @@ class Discipline(Base):
     __tablename__ = "disciplines"
     id = Column(Integer, primary_key=True)
     name = Column(String(100), unique=True, nullable=False)
-
-class UserDiscipline(Base):
-    __tablename__ = "user_disciplines"
-    user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    discipline_id = Column(Integer, ForeignKey("disciplines.id"), primary_key=True)
 
 class StudentGroup(Base):
     __tablename__ = "student_groups"
@@ -54,7 +48,7 @@ class Queue(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     scheduled_date = Column(DateTime(timezone=True), nullable=False)
     status = Column(String(10), nullable=False) # 'active' or 'closed'
-    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     discipline_id = Column(Integer, ForeignKey("disciplines.id"), nullable=False)
 
 class QueueGroup(Base):
@@ -69,7 +63,7 @@ class QueueParticipant(Base):
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     position = Column(Integer, nullable=False)
     joined_at = Column(TIMESTAMP, default=datetime.utcnow)
-    status = Column(String(15), nullable=False) # 'waiting', 'called', 'left', 'deleted'
+    status = Column(String(10), nullable=False) # 'waiting', 'done'
 
 class Notification(Base):
     __tablename__ = "notifications"

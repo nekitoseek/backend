@@ -17,22 +17,25 @@ async def create_user(db: AsyncSession, user: schemas.UserCreate):
         password_hash=hashed_password,
         full_name=user.full_name,
         email=user.email,
-        role=user.role
     )
     db.add(db_user)
+    await db.flush()
+
+    db.add(models.StudentGroup(student_id=db_user.id, group_id=user.group_id))
+
     await db.commit()
     await db.refresh(db_user)
     return db_user
 
 # создание очереди
-async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, teacher_id: int):
+async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id: int):
     new_queue = models.Queue(
         title=queue.title,
         description=queue.description,
         scheduled_date=queue.scheduled_date,
         created_at=datetime.now(timezone.utc),
         status='active',
-        teacher_id=teacher_id,
+        creator_id=creator_id,
         discipline_id=queue.discipline_id
     )
 
@@ -84,7 +87,7 @@ async def delete_queue(db: AsyncSession, queue_id: int, current_user: models.Use
     queue = result.scalars().first()
     if not queue:
         raise HTTPException(status_code=404, detail="Очередь не найдена")
-    if queue.teacher_id != current_user.id:
+    if queue.creator_id != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав на удаление этой очереди")
     await db.execute(delete(models.QueueGroup).where(models.QueueGroup.queue_id == queue_id))
     await db.delete(queue)
@@ -101,7 +104,7 @@ async def queue_update(
     queue = await db.get(models.Queue, queue_id)
     if not queue:
         raise HTTPException(status_code=404, detail="Очередь не найдена")
-    if queue.teacher_id != current_user.id:
+    if queue.creator_id != current_user.id:
         raise HTTPException(status_code=403, detail="Нет прав на изменение этой очереди")
 
     update_data = queue_data.dict(exclude_unset=True)
@@ -138,7 +141,6 @@ async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
         select(models.QueueParticipant).where(
             models.QueueParticipant.queue_id == queue_id,
             models.QueueParticipant.student_id == student_id,
-            models.QueueParticipant.status == "waiting"
         )
     )
     existing = result.scalars().first()
@@ -151,9 +153,7 @@ async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
             models.QueueParticipant.queue_id == queue_id,
         )
     )
-    max_position = result.scalar()
-    if max_position is None:
-        max_position = 0
+    max_position = result.scalar() or 0
 
     new_participant = models.QueueParticipant(
         queue_id=queue_id,
@@ -180,37 +180,14 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
     if not participant:
         raise HTTPException(status_code=404, detail="Вы не стоите в этой очереди")
 
-    participant.status = "left"
-    await send_notification(db, participant.student_id, "Вы покинули очередь")
+    db.delete(participant)
     await db.commit()
     return {"detail": "Вы покинули очередь"}
 
-# вызов следующего по очереди
-async def call_next_student(db: AsyncSession, queue_id: int, teacher_id: int):
-    result = await db.execute(
-        select(models.Queue).where(models.Queue.id == queue_id, models.Queue.teacher_id == teacher_id)
-    )
-    queue = result.scalars().first()
-    if not queue:
-        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
-
-    result = await db.execute(
-        select(models.QueueParticipant).where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "waiting")
-        .order_by(models.QueueParticipant.position.asc())
-    )
-    participant = result.scalars().first()
-    if not participant:
-        raise HTTPException(status_code=404, detail="Очередь пуста")
-
-    participant.status = "called"
-    await db.commit()
-    await send_notification(db, participant.student_id, "Вы вызваны в очереди")
-    return {"detail": f"Студент {participant.student_id} вызван"}
-
 # закрытие очереди
-async def close_queue(db: AsyncSession, queue_id: int, teacher_id: int):
+async def close_queue(db: AsyncSession, queue_id: int, creator_id: int):
     result = await db.execute(
-        select(models.Queue).where(models.Queue.id == queue_id, models.Queue.teacher_id == teacher_id)
+        select(models.Queue).where(models.Queue.id == queue_id, models.Queue.creator_id == creator_id)
     )
     queue = result.scalars().first()
     if not queue:
@@ -218,41 +195,41 @@ async def close_queue(db: AsyncSession, queue_id: int, teacher_id: int):
 
     queue.status = "closed"
 
-    await db.execute(
-        update(models.QueueParticipant).where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "waiting")
-        .values(status="closed")
-    )
-
     result = await db.execute(
-        select(models.QueueParticipant).where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "closed")
+        select(models.QueueParticipant)
+        .where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "waiting")
+        .order_by(models.QueueParticipant.position.asc())
     )
     participants = result.scalars().all()
-    for participant in participants:
-        await send_notification(db, participant.student_id, "Очередь была закрыта, вы не успели!")
+
+    if not participants:
+        await db.commit()
+        return {"detail": "Очередь успешно закрыта"}
+
+    current_participant = participants[0]
+    remaining_participants = participants[1:]
+
+    for p in remaining_participants:
+        p.status = "done"
+        await send_notification(db, p.student_id, "Очередь была закрыта, вы не успели")
 
     await db.commit()
     return {"detail": "Очередь успешно закрыта"}
 
 # сдача завершена
-async def complete_current_student(db: AsyncSession, queue_id: int, teacher_id: int):
-    result = await db.execute(
-        select(models.Queue).where(models.Queue.id == queue_id, models.Queue.teacher_id == teacher_id)
-    )
-    queue = result.scalars().first()
-    if not queue:
-        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
-
+async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int):
     result = await db.execute(
         select(models.QueueParticipant)
-        .where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "called")
+        .where(models.QueueParticipant.queue_id == queue_id)
         .order_by(models.QueueParticipant.position.asc())
     )
     participant = result.scalars().first()
-    if not participant:
-        raise HTTPException(status_code=404, detail="Нет вызванного студента")
-    participant.status = "left"
+    if not participant or participant.student_id != user_id:
+        raise HTTPException(status_code=403, detail="Вы не первый в очереди")
+
+    participant.status = "done"
     await db.commit()
-    return {"detail": f"Студент {participant.student_id} завершил сдачу"}
+    return {"detail": "Сдача завершена"}
 
 # уведомления
 async def send_notification(db: AsyncSession, user_id: int, message_text: str):
@@ -269,3 +246,26 @@ async def get_notifications_for_user(db: AsyncSession, user_id: int):
         select(models.Notification).where(models.Notification.user_id == user_id)
     )
     return result.scalars().all()
+
+
+
+### ДЛЯ АДМИНИСТРАТОРА ###
+async def create_group(db: AsyncSession, name: str):
+    existing = await db.execute(select(models.Group).where(models.Group.name == name))
+    if existing.scalar():
+        raise HTTPException(status_code=400, detail="Группа уже существует")
+    group = models.Group(name=name)
+    db.add(group)
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+async def create_discipline(db: AsyncSession, name: str):
+    existing = await db.execute(select(models.Discipline).where(models.Discipline.name == name))
+    if existing.scalar():
+        raise HTTPException(status_code=400, detail="Дисциплина уже существует")
+    discipline = models.Discipline(name=name)
+    db.add(discipline)
+    await db.commit()
+    await db.refresh(discipline)
+    return discipline

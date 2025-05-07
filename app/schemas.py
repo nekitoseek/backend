@@ -23,20 +23,31 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     email: EmailStr
-    role: str
+    group_id: int
 
 class UserOut(BaseModel):
     id: int
     username: str
     full_name: str
     email: EmailStr
-    role: str
     telegram_id: Optional[str]
     registration_date: datetime
 
     class Config:
         orm_mode = True
 
+
+# список студентов в очереди
+class QueueParticipantOut(BaseModel):
+    id: int
+    queue_id: int
+    student_id: int
+    position: int
+    joined_at: datetime
+    status: str
+
+    class Config:
+        orm_mode = True
 
 
 # создание очереди
@@ -53,8 +64,9 @@ class QueueOut(BaseModel):
     description: Optional[str]
     scheduled_date: datetime
     status: str
-    teacher_id: int
+    creator_id: int
     discipline_id: int
+    participants: Optional[List[QueueParticipantOut]]
 
     class Config:
         from_attributes = True
@@ -67,6 +79,7 @@ class QueueUpdate(BaseModel):
     scheduled_date: Optional[datetime] = None
     discipline_id: Optional[int] = None
     group_ids: Optional[List[int]] = None
+
 
 
 class NotificationOut(BaseModel):
