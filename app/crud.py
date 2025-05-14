@@ -169,6 +169,7 @@ async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
 
 # покидание очереди
 async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
+
     result = await db.execute(
         select(models.QueueParticipant).where(
             models.QueueParticipant.queue_id == queue_id,
@@ -178,9 +179,9 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
     )
     participant = result.scalars().first()
     if not participant:
-        raise HTTPException(status_code=404, detail="Вы не стоите в этой очереди")
+        raise HTTPException(status_code=404, detail="Вы не состоите в этой очереди")
 
-    db.delete(participant)
+    await db.delete(participant)
     await db.commit()
     return {"detail": "Вы покинули очередь"}
 

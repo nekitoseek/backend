@@ -69,6 +69,24 @@ async def get_queues_route(
 ):
     return await crud.get_queues(db, group_id, discipline_id, status)
 
+# api для просмотра конкретной очереди
+@app.get("/queues/{queue_id}", response_model=schemas.QueueOut)
+async def get_queue_detail(
+        queue_id: int,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    with db.no_autoflush:
+        result = await db.execute(
+            select(models.Queue).where(models.Queue.id == queue_id)
+        )
+        queue = result.scalars().first()
+
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очередь не найдена")
+
+    return schemas.QueueOut.from_orm(queue)
+
 # api для удаления очереди (только владелец)
 @app.delete("/queues/{queue_id}")
 async def delete_queue_route(

@@ -15,8 +15,6 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
-
-
 # регистрация пользователя
 class UserCreate(BaseModel):
     username: str
@@ -66,7 +64,6 @@ class QueueOut(BaseModel):
     status: str
     creator_id: int
     discipline_id: int
-    participants: Optional[List[QueueParticipantOut]]
 
     class Config:
         from_attributes = True
@@ -79,7 +76,6 @@ class QueueUpdate(BaseModel):
     scheduled_date: Optional[datetime] = None
     discipline_id: Optional[int] = None
     group_ids: Optional[List[int]] = None
-
 
 
 class NotificationOut(BaseModel):
