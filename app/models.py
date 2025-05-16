@@ -63,7 +63,7 @@ class QueueParticipant(Base):
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     position = Column(Integer, nullable=False)
     joined_at = Column(TIMESTAMP, default=datetime.utcnow)
-    status = Column(String(10), nullable=False) # 'waiting', 'done'
+    status = Column(String(10), nullable=False) # 'waiting', 'current', 'done'
 
 class Notification(Base):
     __tablename__ = "notifications"

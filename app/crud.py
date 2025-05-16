@@ -136,6 +136,20 @@ async def get_students_in_queue(db: AsyncSession, queue_id: int):
 
 # запись в очередь
 async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
+    # проверка на принадлежность студента группе, для которой создана очередь
+    result = await db.execute(
+        select(models.QueueGroup.group_id)
+        .where(models.QueueGroup.queue_id == queue_id)
+    )
+    allowed_group_ids = {row[0] for row in result.fetchall()}
+    result = await db.execute(
+        select(models.StudentGroup.group_id)
+        .where(models.StudentGroup.student_id == student_id)
+    )
+    student_group_ids = {row[0] for row in result.fetchall()}
+    if not allowed_group_ids & student_group_ids:
+        raise HTTPException(status_code=403, detail="Ваша группа не участвует в этой очереди")
+
     # проверка есть ли студент уже в очереди
     result = await db.execute(
         select(models.QueueParticipant).where(
@@ -173,8 +187,7 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
     result = await db.execute(
         select(models.QueueParticipant).where(
             models.QueueParticipant.queue_id == queue_id,
-            models.QueueParticipant.student_id == student_id,
-            models.QueueParticipant.status == "waiting"
+            models.QueueParticipant.student_id == student_id
         )
     )
     participant = result.scalars().first()
@@ -219,16 +232,32 @@ async def close_queue(db: AsyncSession, queue_id: int, creator_id: int):
 
 # сдача завершена
 async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int):
+    result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
+    queue = result.scalars().first()
+    now = datetime.now(timezone.utc)
+    if now < queue.scheduled_date:
+        raise HTTPException(status_code=403, detail="Очередь еще не началась")
+
     result = await db.execute(
         select(models.QueueParticipant)
         .where(models.QueueParticipant.queue_id == queue_id)
         .order_by(models.QueueParticipant.position.asc())
     )
-    participant = result.scalars().first()
-    if not participant or participant.student_id != user_id:
-        raise HTTPException(status_code=403, detail="Вы не первый в очереди")
+    participants = result.scalars().all()
+    if not participants:
+        raise HTTPException(status_code=404, detail="Очередь пуста")
 
-    participant.status = "done"
+    current_participant = participants[0]
+    if current_participant.student_id != user_id or current_participant.status != "current":
+        raise HTTPException(status_code=403, detail="Вы не сдающий участник")
+
+    current_participant.status = "done"
+
+    for p in participants[1:]:
+        if p.status == "waiting":
+            p.status = "current"
+            break
+
     await db.commit()
     return {"detail": "Сдача завершена"}
 
@@ -270,3 +299,38 @@ async def create_discipline(db: AsyncSession, name: str):
     await db.commit()
     await db.refresh(discipline)
     return discipline
+
+# старт очереди по времени
+async def maybe_start_queue(db: AsyncSession, queue_id: int):
+    result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
+    queue = result.scalars().first()
+    if not queue or queue.status != "active":
+        return
+
+    now = datetime.now(timezone.utc)
+    if now < queue.scheduled_date:
+        return
+
+    # проверка есть ли уже сдающий
+    result = await db.execute(
+        select(models.QueueParticipant).where(
+            models.QueueParticipant.queue_id == queue_id,
+            models.QueueParticipant.status == "current"
+        )
+    )
+
+    current = result.scalars().first()
+    if current:
+        return
+
+    # назначение первого в очереди сдающим
+    result = await db.execute(
+        select(models.QueueParticipant)
+        .where(models.QueueParticipant.queue_id == queue_id)
+        .where(models.QueueParticipant.status == "waiting")
+        .order_by(models.QueueParticipant.position)
+    )
+    next_participant = result.scalars().first()
+    if next_participant:
+        next_participant.status = "current"
+        await db.commit()

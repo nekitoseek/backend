@@ -114,6 +114,7 @@ async def get_queue_students(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
+    await crud.maybe_start_queue(db, queue_id)
     return await crud.get_students_in_queue(db, queue_id)
 
 
