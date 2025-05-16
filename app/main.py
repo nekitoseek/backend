@@ -47,7 +47,7 @@ async def login(
 # api для проверки роли пользователя
 @app.get("/me")
 async def read_current_user(current_user: models.User = Depends(auth.get_current_user)):
-    return {"id": current_user.id, "username": current_user.username, "email": current_user.email}
+    return {"id": current_user.id, "username": current_user.username, "email": current_user.email, "full_name": current_user.full_name}
 
 # api создания очереди
 @app.post("/queues", response_model=schemas.QueueOut)
