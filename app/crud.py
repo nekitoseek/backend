@@ -11,6 +11,15 @@ from app import models, schemas
 
 # создание пользователя
 async def create_user(db: AsyncSession, user: schemas.UserCreate):
+    # проверка, логин или email уже существуют
+    result = await db.execute(select(models.User).where(models.User.username == user.username))
+    if result.scalars().first():
+        raise HTTPException(status_code=400, detail="Пользователь с таким логином уже существует")
+
+    result = await db.execute(select(models.User).where(models.User.email == user.email))
+    if result.scalars().first():
+        raise HTTPException(status_code=400, detail="Пользователь с таким email уже существует")
+
     hashed_password = bcrypt.hash(user.password)
     db_user = models.User(
         username=user.username,
@@ -277,29 +286,6 @@ async def get_notifications_for_user(db: AsyncSession, user_id: int):
     )
     return result.scalars().all()
 
-
-
-### ДЛЯ АДМИНИСТРАТОРА ###
-async def create_group(db: AsyncSession, name: str):
-    existing = await db.execute(select(models.Group).where(models.Group.name == name))
-    if existing.scalar():
-        raise HTTPException(status_code=400, detail="Группа уже существует")
-    group = models.Group(name=name)
-    db.add(group)
-    await db.commit()
-    await db.refresh(group)
-    return group
-
-async def create_discipline(db: AsyncSession, name: str):
-    existing = await db.execute(select(models.Discipline).where(models.Discipline.name == name))
-    if existing.scalar():
-        raise HTTPException(status_code=400, detail="Дисциплина уже существует")
-    discipline = models.Discipline(name=name)
-    db.add(discipline)
-    await db.commit()
-    await db.refresh(discipline)
-    return discipline
-
 # старт очереди по времени
 async def maybe_start_queue(db: AsyncSession, queue_id: int):
     result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
@@ -334,3 +320,26 @@ async def maybe_start_queue(db: AsyncSession, queue_id: int):
     if next_participant:
         next_participant.status = "current"
         await db.commit()
+
+
+### ДЛЯ АДМИНИСТРАТОРА ###
+async def create_group(db: AsyncSession, name: str):
+    existing = await db.execute(select(models.Group).where(models.Group.name == name))
+    if existing.scalar():
+        raise HTTPException(status_code=400, detail="Группа уже существует")
+    group = models.Group(name=name)
+    db.add(group)
+    await db.commit()
+    await db.refresh(group)
+    return group
+
+async def create_discipline(db: AsyncSession, name: str):
+    existing = await db.execute(select(models.Discipline).where(models.Discipline.name == name))
+    if existing.scalar():
+        raise HTTPException(status_code=400, detail="Дисциплина уже существует")
+    discipline = models.Discipline(name=name)
+    db.add(discipline)
+    await db.commit()
+    await db.refresh(discipline)
+    return discipline
+

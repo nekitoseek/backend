@@ -174,6 +174,11 @@ async def get_groups(
     result = await db.execute(select(models.Group).order_by(models.Group.name))
     return result.scalars().all()
 
+@app.get("/disciplines")
+async def get_disciplines(db: AsyncSession = Depends(database.get_db)):
+    result = await db.execute(select(models.Discipline).order_by(models.Discipline.name))
+    return result.scalars().all()
+
 
 
 ###### ДЛЯ АДМИНИСТРАТОРА ######
