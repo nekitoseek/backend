@@ -3,6 +3,9 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
 
+from app.models import Group
+
+
 # схемы для авторизации
 class Token(BaseModel):
     access_token: str
@@ -53,17 +56,36 @@ class QueueCreate(BaseModel):
     title: str
     description: Optional[str]
     scheduled_date: datetime
+    scheduled_end: datetime
     discipline_id: int
     group_ids: List[int]
+
+# вывод групп
+class GroupOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class DisciplineOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
 
 class QueueOut(BaseModel):
     id: int
     title: str
     description: Optional[str]
     scheduled_date: datetime
+    scheduled_end: datetime
     status: str
     creator_id: int
     discipline_id: int
+    groups: List[GroupOut]
+    discipline: DisciplineOut
 
     class Config:
         from_attributes = True
@@ -74,6 +96,7 @@ class QueueUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     scheduled_date: Optional[datetime] = None
+    scheduled_end: Optional[datetime] = None
     discipline_id: Optional[int] = None
     group_ids: Optional[List[int]] = None
 

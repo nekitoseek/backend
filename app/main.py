@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from app import auth, crud, models, schemas, database
 from typing import List, Optional
 
@@ -76,11 +77,16 @@ async def get_queue_detail(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    with db.no_autoflush:
-        result = await db.execute(
-            select(models.Queue).where(models.Queue.id == queue_id)
+    await crud.maybe_close_queue(db, queue_id)
+    result = await db.execute(
+        select(models.Queue)
+        .options(
+            joinedload(models.Queue.groups),
+            joinedload(models.Queue.discipline)
         )
-        queue = result.scalars().first()
+        .where(models.Queue.id == queue_id)
+    )
+    queue = result.scalars().first()
 
     if not queue:
         raise HTTPException(status_code=404, detail="Очередь не найдена")
@@ -114,6 +120,7 @@ async def get_queue_students(
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
+    await crud.maybe_close_queue(db, queue_id)
     await crud.maybe_start_queue(db, queue_id)
     return await crud.get_students_in_queue(db, queue_id)
 
@@ -139,12 +146,12 @@ async def leave_queue_route(
 
 # api для закрытия очереди
 @app.post("/queues/{queue_id}/close")
-async def close_queue_route(
+async def manual_close_queue_route(
         queue_id: int,
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    return await crud.close_queue(db, queue_id, current_user.id)
+    return await crud.manual_close_queue(db, queue_id, current_user.id)
 
 # api для завершения сдачи (конкретный студент)
 @app.post("/queues/{queue_id}/complete")

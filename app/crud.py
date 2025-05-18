@@ -42,6 +42,7 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
         title=queue.title,
         description=queue.description,
         scheduled_date=queue.scheduled_date,
+        scheduled_end=queue.scheduled_end,
         created_at=datetime.now(timezone.utc),
         status='active',
         creator_id=creator_id,
@@ -68,7 +69,16 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
     # print("Очередь создана с ID:", new_queue.id)
     await db.commit()
     await db.refresh(new_queue)
-    return new_queue
+    result = await db.execute(
+        select(models.Queue)
+        .options(
+            joinedload(models.Queue.groups),
+            joinedload(models.Queue.discipline)
+        )
+        .where(models.Queue.id == new_queue.id)
+    )
+    queue_with_joins = result.scalars().first()
+    return queue_with_joins
     # print("QUEUE DATA:", queue)
 
 # просмотр очередей
@@ -78,7 +88,14 @@ async def get_queues(
     discipline_id: Optional[int] = None,
     status: Optional[str] = 'active'
 ) -> List[models.Queue]:
-    query = select(models.Queue)
+    await db.execute(
+        update(models.Queue)
+        .where(models.Queue.status == "active")
+        .where(models.Queue.scheduled_end <= datetime.now(timezone.utc))
+        .values(status="closed")
+    )
+    await db.commit()
+    query = select(models.Queue).options(joinedload(models.Queue.groups), joinedload(models.Queue.discipline))
 
     if status:
         query = query.where(models.Queue.status == status)
@@ -88,7 +105,7 @@ async def get_queues(
         query = query.where(models.Queue.discipline_id == discipline_id)
 
     result = await db.execute(query)
-    return result.scalars().all()
+    return result.unique().scalars().all()
 
 # удаление очереди
 async def delete_queue(db: AsyncSession, queue_id: int, current_user: models.User):
@@ -207,37 +224,6 @@ async def leave_queue(db: AsyncSession, queue_id: int, student_id: int):
     await db.commit()
     return {"detail": "Вы покинули очередь"}
 
-# закрытие очереди
-async def close_queue(db: AsyncSession, queue_id: int, creator_id: int):
-    result = await db.execute(
-        select(models.Queue).where(models.Queue.id == queue_id, models.Queue.creator_id == creator_id)
-    )
-    queue = result.scalars().first()
-    if not queue:
-        raise HTTPException(status_code=403, detail="Вы не владелец этой очереди")
-
-    queue.status = "closed"
-
-    result = await db.execute(
-        select(models.QueueParticipant)
-        .where(models.QueueParticipant.queue_id == queue_id, models.QueueParticipant.status == "waiting")
-        .order_by(models.QueueParticipant.position.asc())
-    )
-    participants = result.scalars().all()
-
-    if not participants:
-        await db.commit()
-        return {"detail": "Очередь успешно закрыта"}
-
-    current_participant = participants[0]
-    remaining_participants = participants[1:]
-
-    for p in remaining_participants:
-        p.status = "done"
-        await send_notification(db, p.student_id, "Очередь была закрыта, вы не успели")
-
-    await db.commit()
-    return {"detail": "Очередь успешно закрыта"}
 
 # сдача завершена
 async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int):
@@ -297,6 +283,19 @@ async def maybe_start_queue(db: AsyncSession, queue_id: int):
     if now < queue.scheduled_date:
         return
 
+
+async def maybe_close_queue(db: AsyncSession, queue_id: int):
+    result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
+    queue = result.scalars().first()
+
+    if not queue:
+        return
+
+    now = datetime.now(timezone.utc)
+    if queue.status == "active" and queue.scheduled_end <= now:
+        queue.status = "closed"
+        await db.commit()
+
     # проверка есть ли уже сдающий
     result = await db.execute(
         select(models.QueueParticipant).where(
@@ -321,6 +320,24 @@ async def maybe_start_queue(db: AsyncSession, queue_id: int):
         next_participant.status = "current"
         await db.commit()
 
+
+# завершение очереди вручную
+async def manual_close_queue(db: AsyncSession, queue_id: int, user_id: int):
+    result = await db.execute(
+        select(models.Queue).where(models.Queue.id == queue_id)
+    )
+    queue = result.scalars().first()
+
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очередь не найдена")
+    if queue.creator_id != user_id:
+        raise HTTPException(status_code=403, detail="Вы не владелец очереди")
+    if queue.status == "closed":
+        raise HTTPException(status_code=400, detail="Очередь уже завершена")
+
+    queue.status = "closed"
+    await db.commit()
+    return {"detail": "Очередь завершена вручную"}
 
 ### ДЛЯ АДМИНИСТРАТОРА ###
 async def create_group(db: AsyncSession, name: str):
