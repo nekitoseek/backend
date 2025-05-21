@@ -50,6 +50,14 @@ async def login(
 async def read_current_user(current_user: models.User = Depends(auth.get_current_user)):
     return {"id": current_user.id, "username": current_user.username, "email": current_user.email, "full_name": current_user.full_name}
 
+@app.patch("/me", response_model=schemas.UserOut)
+async def update_profile(
+        data: schemas.UserUpdate,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    return await crud.update_user(db, current_user.id, data)
+
 # api создания очереди
 @app.post("/queues", response_model=schemas.QueueOut)
 async def create_queue_route(
@@ -64,7 +72,7 @@ async def create_queue_route(
 async def get_queues_route(
     group_id: Optional[int] = None,
     discipline_id: Optional[int] = None,
-    status: str = "active",
+    status: Optional[str] = None,
     db: AsyncSession = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
@@ -198,6 +206,20 @@ async def add_group_route(
     verify_admin(current_user)
     return await crud.create_group(db, name)
 
+@app.delete("/admin/groups/{group_id}")
+async def delete_group(
+        group_id: int,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    group = await db.get(models.Group, group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Группа не найдена")
+    await db.delete(group)
+    await db.commit()
+    return {"detail": "Группа удалена"}
+
 @app.post("/admin/disciplines")
 async def add_discipline_route(
         name: str = Body(...),
@@ -206,3 +228,69 @@ async def add_discipline_route(
 ):
     verify_admin(current_user)
     return await crud.create_discipline(db, name)
+
+@app.delete("/admin/disciplines/{discipline_id}")
+async def delete_discipline(
+        discipline_id: int,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    discipline = await db.get(models.Discipline, discipline_id)
+    if not discipline:
+        raise HTTPException(status_code=404, detail="Дисциплина не найдена")
+    await db.delete(discipline)
+    await db.commit()
+    return {"detail": "Дисциплина удалена"}
+
+@app.get("/admin/queues", response_model=List[schemas.QueueOut])
+async def get_all_queues_admin(
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    result = await db.execute(
+        select(models.Queue)
+        .options(
+            joinedload(models.Queue.groups),
+            joinedload(models.Queue.discipline)
+        )
+        .order_by(models.Queue.scheduled_date.desc())
+    )
+    return result.unique().scalars().all()
+
+@app.delete("/admin/queues/{queue_id}")
+async def delete_queue_admin(
+        queue_id: int,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    return await crud.delete_queue_by_admin(db, queue_id)
+
+@app.patch("/admin/queues/{queue_id}", response_model=schemas.QueueOut)
+async def update_queue_admin(
+        queue_id: int,
+        data: schemas.QueueUpdate,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    return await crud.queue_update_admin(db, queue_id, data)
+
+@app.post("/admin/queues/{queue_id}/force-close")
+async def force_close_queue_admin(
+        queue_id: int,
+        db: AsyncSession = Depends(database.get_db),
+        current_user: models.User = Depends(auth.get_current_user)
+):
+    verify_admin(current_user)
+    result = await db.execute(
+        select(models.Queue).where(models.Queue.id == queue_id)
+    )
+    queue = result.scalars().first()
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очереди не найдена")
+    queue.status = "closed"
+    await db.commit()
+    return {"detail": "Очередь принудительно закрыта"}

@@ -38,6 +38,13 @@ class UserOut(BaseModel):
         orm_mode = True
 
 
+class UserUpdate(BaseModel):
+    full_name: Optional[str]
+    email: Optional[EmailStr]
+    password: Optional[str]
+    group_id: Optional[int]
+
+
 # список студентов в очереди
 class QueueParticipantOut(BaseModel):
     id: int

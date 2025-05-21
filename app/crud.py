@@ -8,6 +8,9 @@ from passlib.hash import bcrypt
 from datetime import datetime, timezone
 from typing import List, Optional
 from app import models, schemas
+from app.models import QueueParticipant
+from app.schemas import QueueUpdate
+
 
 # создание пользователя
 async def create_user(db: AsyncSession, user: schemas.UserCreate):
@@ -35,6 +38,31 @@ async def create_user(db: AsyncSession, user: schemas.UserCreate):
     await db.commit()
     await db.refresh(db_user)
     return db_user
+
+
+async def update_user(db: AsyncSession, user_id: int, data: schemas.UserUpdate):
+    user = await db.get(models.User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    update_data = data.dict(exclude_unset=True)
+
+    if "password" in update_data:
+        update_data["password_hash"] = bcrypt.hash(update_data.pop("password"))
+
+    for key, value in update_data.items():
+        setattr(user, key, value)
+
+    if "group_id" in update_data:
+        await db.execute(
+            delete(models.StudentGroup).where(models.StudentGroup.student_id == user_id)
+        )
+        db.add(models.StudentGroup(student_id=user.id, group_id=update_data["group_id"]))
+
+    await db.commit()
+    await db.refresh(user)
+    return user
+
 
 # создание очереди
 async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id: int):
@@ -360,3 +388,36 @@ async def create_discipline(db: AsyncSession, name: str):
     await db.refresh(discipline)
     return discipline
 
+async def delete_queue_by_admin(db: AsyncSession, queue_id: int):
+    queue = await db.get(models.Queue, queue_id)
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очередь не найдена")
+    await db.execute(delete(models.QueueGroup).where(models.QueueGroup.queue_id == queue.id))
+    await db.execute(delete(models.QueueParticipant).where(models.QueueParticipant.queue_id == queue.id))
+    await db.delete(queue)
+    await db.commit()
+    return {"detail": "Очередь удалена администратором"}
+
+async def queue_update_admin(db: AsyncSession, queue_id: int, data: QueueUpdate):
+    queue = await db.get(models.Queue, queue_id)
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очередь не найдена")
+    update_data = data.dict(exclude_unset=True)
+
+    for key, value in update_data.items():
+        if key != "group_ids":
+            setattr(queue, key, value)
+
+    if "group_ids" in update_data:
+        await db.execute(delete(models.QueueGroup).where(models.QueueGroup.queue_id == queue.id))
+        for group_id in set(update_data["group_ids"]):
+            db.add(models.QueueGroup(queue_id=queue_id, group_id=group_id))
+
+    await db.commit()
+    result = await db.execute(
+        select(models.Queue)
+        .options(joinedload(models.Queue.groups), joinedload(models.Queue.discipline))
+        .where(models.Queue.id == queue_id)
+    )
+    queue_with_joins = result.scalars().first()
+    return queue_with_joins
