@@ -123,7 +123,7 @@ async def get_queues(
         .values(status="closed")
     )
     await db.commit()
-    query = select(models.Queue).options(joinedload(models.Queue.groups), joinedload(models.Queue.discipline))
+    query = select(models.Queue).options(joinedload(models.Queue.groups), joinedload(models.Queue.discipline), joinedload(models.Queue.creator))
 
     if status:
         query = query.where(models.Queue.status == status)
@@ -181,12 +181,23 @@ async def queue_update(
 # просмотр студентов в очереди
 async def get_students_in_queue(db: AsyncSession, queue_id: int):
     result = await db.execute(
-        select(models.User)
+        select(models.User.id, models.User.username, models.User.full_name, models.User.email, models.QueueParticipant.status, models.QueueParticipant.joined_at)
         .join(models.QueueParticipant, models.QueueParticipant.student_id == models.User.id)
         .where(models.QueueParticipant.queue_id == queue_id)
         .order_by(models.QueueParticipant.position)
     )
-    return result.scalars().all()
+    rows = result.all()
+    return [
+        schemas.StudentInQueueOut(
+            id=row[0],
+            username=row[1],
+            full_name=row[2],
+            email=row[3],
+            status=row[4],
+            joined_at=row[5],
+        )
+        for row in rows
+    ]
 
 # запись в очередь
 async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
@@ -270,8 +281,8 @@ async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int
     if not participants:
         raise HTTPException(status_code=404, detail="Очередь пуста")
 
-    current_participant = participants[0]
-    if current_participant.student_id != user_id or current_participant.status != "current":
+    current_participant = next((p for p in participants if p.status == "current"), None)
+    if not current_participant or current_participant.student_id != user_id:
         raise HTTPException(status_code=403, detail="Вы не сдающий участник")
 
     current_participant.status = "done"

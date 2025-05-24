@@ -90,7 +90,8 @@ async def get_queue_detail(
         select(models.Queue)
         .options(
             joinedload(models.Queue.groups),
-            joinedload(models.Queue.discipline)
+            joinedload(models.Queue.discipline),
+            joinedload(models.Queue.creator)
         )
         .where(models.Queue.id == queue_id)
     )
@@ -122,7 +123,7 @@ async def update_queue_route(
 
 
 # api для просмотра студентов в очереди
-@app.get("/queues/{queue_id}/students", response_model=List[schemas.UserOut])
+@app.get("/queues/{queue_id}/students", response_model=List[schemas.StudentInQueueOut])
 async def get_queue_students(
         queue_id: int,
         db: AsyncSession = Depends(database.get_db),
@@ -253,7 +254,8 @@ async def get_all_queues_admin(
         select(models.Queue)
         .options(
             joinedload(models.Queue.groups),
-            joinedload(models.Queue.discipline)
+            joinedload(models.Queue.discipline),
+            joinedload(models.Queue.creator)
         )
         .order_by(models.Queue.scheduled_date.desc())
     )

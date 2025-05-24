@@ -4,16 +4,6 @@ from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 
 Base = declarative_base()
-# таблицы:
-    #   users +
-    #   groups +
-    #   disciplines +
-    #   user_disciplines +
-    #   student_groups +
-    #   queues +
-    #   queue_groups +
-    #   queue_participants +
-    #   notifications +
 
 class User(Base):
     __tablename__ = "users"
@@ -54,6 +44,7 @@ class Queue(Base):
 
     groups = relationship("Group", secondary="queue_groups", backref="queues")
     discipline = relationship("Discipline")
+    creator = relationship("User", foreign_keys=[creator_id])
 
 class QueueGroup(Base):
     __tablename__ = "queue_groups"

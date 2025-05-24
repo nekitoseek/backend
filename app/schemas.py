@@ -57,6 +57,16 @@ class QueueParticipantOut(BaseModel):
     class Config:
         orm_mode = True
 
+class StudentInQueueOut(BaseModel):
+    id: int
+    username: str
+    full_name: str
+    email: EmailStr
+    status: str
+    joined_at: datetime
+
+    class Config:
+        orm_mode = True
 
 # создание очереди
 class QueueCreate(BaseModel):
@@ -82,14 +92,24 @@ class DisciplineOut(BaseModel):
     class Config:
         from_attributes = True
 
+class CreatorOut(BaseModel):
+    id: int
+    username: str
+    full_name: str
+
+    class Config:
+        from_attributes = True
+
 class QueueOut(BaseModel):
     id: int
     title: str
     description: Optional[str]
+    created_at: datetime
     scheduled_date: datetime
     scheduled_end: datetime
     status: str
     creator_id: int
+    creator: CreatorOut
     discipline_id: int
     groups: List[GroupOut]
     discipline: DisciplineOut
@@ -115,4 +135,4 @@ class NotificationOut(BaseModel):
     status: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
