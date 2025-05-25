@@ -1,7 +1,7 @@
 # модель User (sqlalchemy)
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, TIMESTAMP, DateTime
 from sqlalchemy.orm import declarative_base, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 
 Base = declarative_base()
 
@@ -38,7 +38,7 @@ class Queue(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     scheduled_date = Column(DateTime(timezone=True), nullable=False)
     scheduled_end = Column(DateTime(timezone=True), nullable=False)
-    status = Column(String(10), nullable=False) # 'active' or 'closed'
+    status = Column(String(10), nullable=False) # 'active', 'upcoming' or 'closed'
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     discipline_id = Column(Integer, ForeignKey("disciplines.id"), nullable=False)
 

@@ -1,7 +1,7 @@
 # схемы (pydantic)
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.models import Group
 
@@ -39,10 +39,10 @@ class UserOut(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    full_name: Optional[str]
-    email: Optional[EmailStr]
-    password: Optional[str]
-    group_id: Optional[int]
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    group_id: Optional[int] = None
 
 
 # список студентов в очереди
@@ -59,14 +59,13 @@ class QueueParticipantOut(BaseModel):
 
 class StudentInQueueOut(BaseModel):
     id: int
-    username: str
     full_name: str
-    email: EmailStr
     status: str
     joined_at: datetime
+    group: str
 
     class Config:
-        orm_mode = True
+        orm_mode = False
 
 # создание очереди
 class QueueCreate(BaseModel):

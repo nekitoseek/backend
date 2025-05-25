@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
 from passlib.hash import bcrypt
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from app import models, schemas
 from app.models import QueueParticipant
@@ -66,23 +66,49 @@ async def update_user(db: AsyncSession, user_id: int, data: schemas.UserUpdate):
 
 # создание очереди
 async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id: int):
+    now = datetime.now(timezone.utc)
+    scheduled = queue.scheduled_date.replace(tzinfo=timezone.utc)
+    scheduled_end = queue.scheduled_end.replace(tzinfo=timezone.utc)
+    if scheduled - now > timedelta(days=1):
+        raise HTTPException(status_code=400, detail="Очередь можно создать не ранее, чем за 1 день до начала сдачи")
+
+    if scheduled <= now < scheduled_end:
+        status = "active"
+    elif now < scheduled:
+        status = "upcoming"
+    else:
+        status = "closed"
+
     new_queue = models.Queue(
         title=queue.title,
         description=queue.description,
         scheduled_date=queue.scheduled_date,
         scheduled_end=queue.scheduled_end,
         created_at=datetime.now(timezone.utc),
-        status='active',
+        status=status,
         creator_id=creator_id,
         discipline_id=queue.discipline_id
     )
+
+    existing_query = (
+        select(models.Queue)
+        .join(models.QueueGroup)
+        .where(models.Queue.scheduled_date == queue.scheduled_date)
+        .where(models.Queue.scheduled_end == queue.scheduled_end)
+        .where(models.Queue.discipline_id == queue.discipline_id)
+        .where(models.QueueGroup.group_id.in_(queue.group_ids))
+    )
+    existing_result = await db.execute(existing_query)
+    existing_queue = existing_result.scalars().first()
+
+    if existing_queue:
+        raise HTTPException(status_code=400, detail="Такая очередь уже существует")
 
     db.add(new_queue)
     await db.flush() # получаем ID новой очереди
 
     # привязка группы к очереди
     for group_id in set(queue.group_ids):
-        # db.add(models.QueueGroup(queue_id=new_queue.id, group_id=group_id))
         existing = await db.execute(
             select(models.QueueGroup)
             .where(models.QueueGroup.queue_id == new_queue.id)
@@ -92,9 +118,6 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
         if not existing.scalar():
             db.add(models.QueueGroup(queue_id=new_queue.id, group_id=group_id))
 
-    # print("Создание очереди:", queue)
-    # print("Привязываем группы:", queue.group_ids)
-    # print("Очередь создана с ID:", new_queue.id)
     await db.commit()
     await db.refresh(new_queue)
     result = await db.execute(
@@ -107,7 +130,6 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
     )
     queue_with_joins = result.scalars().first()
     return queue_with_joins
-    # print("QUEUE DATA:", queue)
 
 # просмотр очередей
 async def get_queues(
@@ -116,17 +138,47 @@ async def get_queues(
     discipline_id: Optional[int] = None,
     status: Optional[str] = 'active'
 ) -> List[models.Queue]:
+    now = datetime.now(timezone.utc)
+
     await db.execute(
         update(models.Queue)
         .where(models.Queue.status == "active")
-        .where(models.Queue.scheduled_end <= datetime.now(timezone.utc))
+        .where(models.Queue.scheduled_end <= now)
         .values(status="closed")
     )
     await db.commit()
-    query = select(models.Queue).options(joinedload(models.Queue.groups), joinedload(models.Queue.discipline), joinedload(models.Queue.creator))
 
-    if status:
-        query = query.where(models.Queue.status == status)
+    base_query = select(models.Queue).options(
+        joinedload(models.Queue.groups),
+        joinedload(models.Queue.discipline),
+        joinedload(models.Queue.creator)
+    )
+    base_result = await db.execute(base_query)
+    all_queues = base_result.unique().scalars().all()
+
+    for queue in all_queues:
+        if queue.status == "upcoming":
+            await maybe_start_queue(db, queue.id)
+        elif queue.status == "active":
+            await maybe_close_queue(db, queue.id)
+
+    query = select(models.Queue).options(
+        joinedload(models.Queue.groups),
+        joinedload(models.Queue.discipline),
+        joinedload(models.Queue.creator)
+    )
+
+    if status == "active":
+        query = query.where(models.Queue.status == "active")
+    elif status == "closed":
+        query = query.where(models.Queue.status == "closed")
+    elif status == "upcoming":
+        query = query.where(models.Queue.status == "upcoming")
+    elif status == "all":
+        pass
+    elif status:
+        raise HTTPException(status_code=400, detail="Недопустимый статус")
+
     if group_id:
         query = query.where(models.Queue.group_ids.any(group_id))
     if discipline_id:
@@ -181,26 +233,38 @@ async def queue_update(
 # просмотр студентов в очереди
 async def get_students_in_queue(db: AsyncSession, queue_id: int):
     result = await db.execute(
-        select(models.User.id, models.User.username, models.User.full_name, models.User.email, models.QueueParticipant.status, models.QueueParticipant.joined_at)
+        select(models.User.id, models.User.full_name, models.QueueParticipant.status, models.QueueParticipant.joined_at, models.Group.name.label("group_name"))
         .join(models.QueueParticipant, models.QueueParticipant.student_id == models.User.id)
+        .join(models.StudentGroup, models.StudentGroup.student_id == models.User.id)
+        .join(models.Group, models.Group.id == models.StudentGroup.group_id)
         .where(models.QueueParticipant.queue_id == queue_id)
         .order_by(models.QueueParticipant.position)
     )
-    rows = result.all()
+    rows = result.fetchall()
     return [
-        schemas.StudentInQueueOut(
-            id=row[0],
-            username=row[1],
-            full_name=row[2],
-            email=row[3],
-            status=row[4],
-            joined_at=row[5],
-        )
+        {
+            "id": row[0],
+            "full_name": row[1],
+            "status": row[2],
+            "joined_at": row[3],
+            "group": row[4],
+        }
         for row in rows
     ]
 
 # запись в очередь
 async def join_queue(db: AsyncSession, queue_id: int, student_id: int):
+    result = await db.execute(
+        select(models.Queue).where(models.Queue.id == queue_id)
+    )
+    queue = result.scalars().first()
+    if not queue:
+        raise HTTPException(status_code=404, detail="Очередь не найдена")
+
+    now = datetime.now(timezone.utc)
+    if queue.status == "closed":
+        raise HTTPException(status_code=403, detail="Очередь завершена, запись невозможна")
+
     # проверка на принадлежность студента группе, для которой создана очередь
     result = await db.execute(
         select(models.QueueGroup.group_id)
@@ -269,6 +333,8 @@ async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int
     result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
     queue = result.scalars().first()
     now = datetime.now(timezone.utc)
+    if queue.status != "active":
+        raise HTTPException(status_code=403, detail="Очередь не активна")
     if now < queue.scheduled_date:
         raise HTTPException(status_code=403, detail="Очередь еще не началась")
 
@@ -315,12 +381,24 @@ async def get_notifications_for_user(db: AsyncSession, user_id: int):
 async def maybe_start_queue(db: AsyncSession, queue_id: int):
     result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))
     queue = result.scalars().first()
-    if not queue or queue.status != "active":
+    if not queue or queue.status != "upcoming":
         return
 
     now = datetime.now(timezone.utc)
-    if now < queue.scheduled_date:
-        return
+    if now >= queue.scheduled_date and now < queue.scheduled_end:
+        queue.status = "active"
+
+        result = await db.execute(
+            select(models.QueueParticipant)
+            .where(models.QueueParticipant.queue_id == queue_id)
+            .where(models.QueueParticipant.status == "waiting")
+            .order_by(models.QueueParticipant.position)
+        )
+        first = result.scalars().first()
+        if first:
+            first.status = "current"
+
+        await db.commit()
 
 
 async def maybe_close_queue(db: AsyncSession, queue_id: int):

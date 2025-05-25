@@ -13,7 +13,7 @@ def verify_admin(current_user: models.User):
     if current_user.username != "admin":
         raise HTTPException(status_code=403, detail="Нет прав администратора.")
 
-# Разрешаем доступ с фронта
+# Доступ с фронта
 origins = ["http://localhost:5173"]
 app.add_middleware(
     CORSMiddleware,
