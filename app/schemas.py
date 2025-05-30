@@ -9,6 +9,7 @@ from app.models import Group
 # схемы для авторизации
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str
 
 class TokenData(BaseModel):
@@ -37,12 +38,15 @@ class UserOut(BaseModel):
     class Config:
         orm_mode = True
 
+class TelegramReset(BaseModel):
+    telegram_id: str
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     group_id: Optional[int] = None
+    telegram_id: Optional[str] = None
 
 
 # список студентов в очереди

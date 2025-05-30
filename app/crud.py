@@ -1,6 +1,6 @@
 # crud-функции
 from fastapi import HTTPException
-from sqlalchemy import delete, func, update, select
+from sqlalchemy import delete, func, update, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import joinedload
@@ -10,6 +10,9 @@ from typing import List, Optional
 from app import models, schemas
 from app.models import QueueParticipant
 from app.schemas import QueueUpdate
+from app.telegram_utils import notify_telegram_user
+import httpx
+import asyncio
 
 
 # создание пользователя
@@ -69,6 +72,7 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
     now = datetime.now(timezone.utc)
     scheduled = queue.scheduled_date.replace(tzinfo=timezone.utc)
     scheduled_end = queue.scheduled_end.replace(tzinfo=timezone.utc)
+
     if scheduled - now > timedelta(days=1):
         raise HTTPException(status_code=400, detail="Очередь можно создать не ранее, чем за 1 день до начала сдачи")
 
@@ -99,9 +103,8 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
         .where(models.QueueGroup.group_id.in_(queue.group_ids))
     )
     existing_result = await db.execute(existing_query)
-    existing_queue = existing_result.scalars().first()
 
-    if existing_queue:
+    if existing_result.scalars().first():
         raise HTTPException(status_code=400, detail="Такая очередь уже существует")
 
     db.add(new_queue)
@@ -120,6 +123,22 @@ async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id:
 
     await db.commit()
     await db.refresh(new_queue)
+
+    for group_id in queue.group_ids:
+        result = await db.execute(
+            select(models.User.telegram_id)
+            .join(models.StudentGroup, models.StudentGroup.student_id == models.User.id)
+            .where(models.StudentGroup.group_id == group_id)
+            .where(models.User.telegram_id != None)
+        )
+        tg_ids = [row[0] for row in result.fetchall()]
+        for tg_id in tg_ids:
+            await notify_telegram_user(
+                tg_id,
+                f"Создана новая очередь: {new_queue.title}. Не забудь записаться!"
+            )
+            await asyncio.sleep(0.5)
+
     result = await db.execute(
         select(models.Queue)
         .options(
@@ -136,7 +155,8 @@ async def get_queues(
     db: AsyncSession,
     group_id: Optional[int] = None,
     discipline_id: Optional[int] = None,
-    status: Optional[str] = 'active'
+    status: Optional[str] = 'active',
+    search: Optional[str] = None,
 ) -> List[models.Queue]:
     now = datetime.now(timezone.utc)
 
@@ -183,6 +203,15 @@ async def get_queues(
         query = query.where(models.Queue.group_ids.any(group_id))
     if discipline_id:
         query = query.where(models.Queue.discipline_id == discipline_id)
+    if search:
+        search_like = f"%{search.lower()}%"
+        query = query.join(models.Discipline).join(models.QueueGroup).join(models.Group).where(
+            or_(
+                func.lower(models.Queue.title).ilike(search_like),
+                func.lower(models.Discipline.name).ilike(search_like),
+                func.lower(models.Group.name).ilike(search_like),
+            )
+        )
 
     result = await db.execute(query)
     return result.unique().scalars().all()
@@ -356,6 +385,10 @@ async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int
     for p in participants[1:]:
         if p.status == "waiting":
             p.status = "current"
+            next_student = await db.get(models.User, p.student_id)
+            if next_student and next_student.telegram_id:
+                await notify_telegram_user(next_student.telegram_id,
+                                           f"Сейчас Ваша очередь сдавать по предмету {queue.title}. Удачи!")
             break
 
     await db.commit()
@@ -397,6 +430,10 @@ async def maybe_start_queue(db: AsyncSession, queue_id: int):
         first = result.scalars().first()
         if first:
             first.status = "current"
+            student = await db.get(models.User, first.student_id)
+            if student and student.telegram_id:
+                await notify_telegram_user(student.telegram_id,
+                                           f"Очередь {queue.title}. Сейчас Ваша очередь сдавать.")
 
         await db.commit()
 
@@ -423,6 +460,9 @@ async def maybe_close_queue(db: AsyncSession, queue_id: int):
 
     current = result.scalars().first()
     if current:
+        return
+
+    if queue.status != "active":
         return
 
     # назначение первого в очереди сдающим

@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
 from app import auth, crud, models, schemas, database
 from typing import List, Optional
@@ -43,7 +43,30 @@ async def login(
         raise HTTPException(status_code=400, detail="Неверный логин или пароль")
 
     access_token = auth.create_access_token(data={"sub": str(db_user.id)})
-    return {"access_token": access_token, "token_type": "bearer"}
+    refresh_token = auth.create_refresh_token(data={"sub": str(db_user.id)})
+    return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
+
+@app.post("/refresh", response_model=schemas.Token)
+async def refresh_token(refresh_token: str = Body(...)):
+    try:
+        payload = jwt.decode(refresh_token, auth.REFRESH_SECRET_KEY, algorithms=[auth.ALGORITHM])
+        user_id = int(payload.get("sub"))
+        new_access_token = auth.create_access_token(data={"sub": str(user_id)})
+        return {
+            "access_token": new_access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Недействительный refresh token")
+
+@app.post("/reset-telegram")
+async def reset_telegram_id(data: schemas.TelegramReset, db: AsyncSession = Depends(database.get_db)):
+    await db.execute(
+        update(models.User).where(models.User.telegram_id == data.telegram_id).values(telegram_id=None)
+    )
+    await db.commit()
+    return {"detail": "Telegram ID сброшен"}
 
 # api для проверки роли пользователя
 @app.get("/me")
@@ -73,10 +96,11 @@ async def get_queues_route(
     group_id: Optional[int] = None,
     discipline_id: Optional[int] = None,
     status: Optional[str] = None,
+    search: Optional[str] = None,
     db: AsyncSession = Depends(database.get_db),
     current_user: models.User = Depends(auth.get_current_user)
 ):
-    return await crud.get_queues(db, group_id, discipline_id, status)
+    return await crud.get_queues(db, group_id, discipline_id, status, search)
 
 # api для просмотра конкретной очереди
 @app.get("/queues/{queue_id}", response_model=schemas.QueueOut)
@@ -246,20 +270,12 @@ async def delete_discipline(
 
 @app.get("/admin/queues", response_model=List[schemas.QueueOut])
 async def get_all_queues_admin(
+        search: Optional[str] = None,
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
     verify_admin(current_user)
-    result = await db.execute(
-        select(models.Queue)
-        .options(
-            joinedload(models.Queue.groups),
-            joinedload(models.Queue.discipline),
-            joinedload(models.Queue.creator)
-        )
-        .order_by(models.Queue.scheduled_date.desc())
-    )
-    return result.unique().scalars().all()
+    return await crud.get_queues(db, None, None, 'all', search)
 
 @app.delete("/admin/queues/{queue_id}")
 async def delete_queue_admin(

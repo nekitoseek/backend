@@ -13,6 +13,11 @@ SECRET_KEY = "supersecret"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
+REFRESH_SECRET_KEY = "refreshsupersecret"
+REFRESH_EXPIRE_DAYS = 7
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+
 async def authenticate_user(db: AsyncSession, username: str, password: str):
     result = await db.execute(select(User).where(User.username == username))
     user = result.scalars().first()
@@ -22,12 +27,15 @@ async def authenticate_user(db: AsyncSession, username: str, password: str):
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/login")
+def create_refresh_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(days=REFRESH_EXPIRE_DAYS)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, REFRESH_SECRET_KEY, algorithm=ALGORITHM)
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
