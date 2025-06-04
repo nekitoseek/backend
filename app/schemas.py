@@ -27,6 +27,14 @@ class UserCreate(BaseModel):
     email: EmailStr
     group_id: int
 
+# вывод групп
+class GroupOut(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        from_attributes = True
+
 class UserOut(BaseModel):
     id: int
     username: str
@@ -34,6 +42,9 @@ class UserOut(BaseModel):
     email: EmailStr
     telegram_id: Optional[str]
     registration_date: datetime
+    group: Optional[GroupOut]
+    is_admin: bool
+    is_active: bool
 
     class Config:
         orm_mode = True
@@ -79,14 +90,6 @@ class QueueCreate(BaseModel):
     scheduled_end: datetime
     discipline_id: int
     group_ids: List[int]
-
-# вывод групп
-class GroupOut(BaseModel):
-    id: int
-    name: str
-
-    class Config:
-        from_attributes = True
 
 class DisciplineOut(BaseModel):
     id: int

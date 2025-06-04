@@ -1,5 +1,5 @@
 # модель User (sqlalchemy)
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, TIMESTAMP, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP, DateTime
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone
 
@@ -14,6 +14,10 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False)
     telegram_id = Column(String(100), nullable=True)
     registration_date = Column(TIMESTAMP, default=datetime.utcnow)
+    is_admin = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    group = relationship("Group", secondary="student_groups", backref="students", uselist=False)
 
 class Group(Base):
     __tablename__ = "groups"

@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.hash import bcrypt
 from app.models import User
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app.database import get_db
@@ -23,6 +25,8 @@ async def authenticate_user(db: AsyncSession, username: str, password: str):
     user = result.scalars().first()
     if not user or not bcrypt.verify(password, user.password_hash):
         return None
+    # if not user.is_active:
+    #     return None
     return user
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
@@ -54,7 +58,12 @@ async def get_current_user(
     except JWTError:
         raise credentials_exception
 
-    user = await db.get(User, user_id)
+    result = await db.execute(
+        select(User)
+        .options(joinedload(User.group))
+        .where(User.id == user_id)
+    )
+    user = result.scalars().first()
     if user is None:
         raise credentials_exception
     return user
