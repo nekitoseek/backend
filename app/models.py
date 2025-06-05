@@ -1,4 +1,4 @@
-# модель User (sqlalchemy)
+# /app/models.py
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Text, TIMESTAMP, DateTime
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime, timezone

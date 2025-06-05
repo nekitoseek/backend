@@ -1,3 +1,4 @@
+# /app/telegrambot/bot.py
 import httpx
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -137,10 +138,22 @@ class TelegramBot:
                 else:
                     keyboard = None
 
+                start = q['scheduled_date'][:16].replace("T", " ")
+                end = q['scheduled_end'][:16].replace("T", " ")
+                group_names = ", ".join(g['name'] for g in q.get('groups', []))
+                discipline = q['discipline']['name'] if q.get('discipline') else "—"
+
+                text_message = (
+                    f"*Название:* {q['title']}\n"
+                    f"*Дисциплина:* {discipline}\n"
+                    f"*Время:* {start} – {end}\n"
+                    f"*Группы:* {group_names}"
+                )
+
                 await update.message.reply_text(
-                    f"Очередь: {q['title']}\nПредмет: {q['discipline']['name']}\n"
-                    f"Время: {q['scheduled_date']} — {q['scheduled_end']}",
-                    reply_markup=keyboard
+                    text_message,
+                    reply_markup=keyboard,
+                    parse_mode="Markdown"
                 )
             else:
                 await update.message.reply_text("Неверный номер очереди.")
@@ -190,13 +203,26 @@ class TelegramBot:
 
         self.last_queues[tg_id] = queues  # сохраняем список для дальнейшего выбора
 
-        message = "Доступные очереди:\n\n"
+        message = ""
         for i, q in enumerate(queues, 1):
-            message += f"{i}. {q['title']} ({q['discipline']['name']})\n   {q['scheduled_date']} – {q['scheduled_end']}\n"
+            group_names = ", ".join(g['name'] for g in q.get('groups', []))
+            discipline = q['discipline']['name'] if q.get('discipline') else "—"
+            start = q['scheduled_date'][:16].replace("T", " ")
+            end = q['scheduled_end'][:16].replace("T", " ")
+
+            message += (
+                f"{i}.\n"
+                f"*Название:* {q['title']}\n"
+                f"*Дисциплина:* {discipline}\n"
+                f"*Время:* {start} – {end}\n"
+                f"*Группы:* {group_names}\n\n"
+            )
+        message += "Ответьте номером очереди, чтобы записаться."
 
         await update.message.reply_text(
-            message + "\nОтветьте номером очереди, чтобы записаться.",
-            reply_markup=ReplyKeyboardMarkup([["Мои очереди", "Мои записи"]], resize_keyboard=True)
+            message,
+            reply_markup=ReplyKeyboardMarkup([["Мои очереди", "Мои записи"]], resize_keyboard=True),
+            parse_mode="Markdown"
         )
 
     async def show_my_participated_queues(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -241,18 +267,26 @@ class TelegramBot:
 
             self.last_queues[tg_id] = [p["queue"] for p in participated]  # сохраняем для дальнейшего использования
 
-            msg = "Ваши записи:\n\n"
+            msg = "*Ваши записи:*\n\n"
             for i, p in enumerate(participated, 1):
                 q = p["queue"]
+                start = q['scheduled_date'][:16].replace("T", " ")
+                end = q['scheduled_end'][:16].replace("T", " ")
+                group_names = ", ".join(g['name'] for g in q.get('groups', []))
+                discipline = q['discipline']['name'] if q.get('discipline') else "—"
                 msg += (
-                    f"{i}. {q['title']} ({q['discipline']['name']})\n"
-                    f"   {q['scheduled_date']} – {q['scheduled_end']}\n"
-                    f"   Ваша позиция: {p['position']}\n"
+                    f"{i}.\n"
+                    f"*Название:* {q['title']}\n"
+                    f"*Дисциплина:* {discipline}\n"
+                    f"*Время:* {start} – {end}\n"
+                    f"*Группы:* {group_names}\n"
+                    f"*Ваша позиция:* {p['position']}\n\n"
                 )
 
             await update.message.reply_text(
-                msg + "\nОтветьте номером очереди, чтобы покинуть её.",
-                reply_markup=ReplyKeyboardMarkup([["Мои очереди", "Мои записи"]], resize_keyboard=True)
+                msg + "Ответьте номером очереди, чтобы покинуть её.",
+                reply_markup=ReplyKeyboardMarkup([["Мои очереди", "Мои записи"]], resize_keyboard=True),
+                parse_mode="Markdown"
             )
 
     async def handle_join_queue(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -263,16 +297,39 @@ class TelegramBot:
         if not token:
             await query.edit_message_text("Авторизация истекла. Введите /login.")
             return
+
         queue_id = query.data.replace("join_queue_", "")
         async with httpx.AsyncClient() as client:
+            # записываемся
             r = await client.post(f"{self.api_base_url}/queues/{queue_id}/join",
                                   headers={"Authorization": f"Bearer {token}"})
-        if r.status_code == 200:
-            await query.edit_message_text("✅ Вы записались.")
-        elif r.status_code == 400:
-            await query.edit_message_text("⚠️ Уже записаны или невозможно записаться.")
-        else:
-            await query.edit_message_text("❌ Ошибка записи в очередь.")
+            if r.status_code == 200:
+                # получаем ID текущего пользователя
+                res_me = await client.get(f"{self.api_base_url}/me", headers={"Authorization": f"Bearer {token}"})
+                user_id = res_me.json()["id"]
+
+                # получаем список участников очереди
+                res_students = await client.get(
+                    f"{self.api_base_url}/queues/{queue_id}/students",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                students = res_students.json()
+                active_students = [s for s in students if s["status"] != "done"]
+
+                # ищем позицию пользователя
+                for pos, s in enumerate(active_students, 1):
+                    if s["id"] == user_id:
+                        await query.edit_message_text(
+                            f"✅ Вы записались.\nТекущая позиция: {pos}"
+                        )
+                        return
+
+                # если не нашли в списке (маловероятно)
+                await query.edit_message_text("✅ Вы записались, но позиция не определена.")
+            elif r.status_code == 400:
+                await query.edit_message_text("⚠️ Уже записаны или невозможно записаться.")
+            else:
+                await query.edit_message_text("❌ Ошибка записи в очередь.")
 
     async def handle_leave_queue(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query

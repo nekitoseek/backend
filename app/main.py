@@ -1,3 +1,4 @@
+# /app/main.py
 from fastapi import FastAPI, Depends, HTTPException, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
@@ -107,14 +108,14 @@ async def create_queue_route(
 # api просмотр активных очередей
 @app.get("/queues", response_model=List[schemas.QueueOut])
 async def get_queues_route(
-        group_id: Optional[int] = None,
+        # group_id: Optional[int] = None,
         discipline_id: Optional[int] = None,
         status: Optional[str] = None,
         search: Optional[str] = None,
         db: AsyncSession = Depends(database.get_db),
         current_user: models.User = Depends(auth.get_current_user)
 ):
-    return await crud.get_queues(db, group_id, discipline_id, status, search)
+    return await crud.get_queues(db, discipline_id, status, search, current_user)
 
 # api для просмотра конкретной очереди
 @app.get("/queues/{queue_id}", response_model=schemas.QueueOut)
@@ -298,7 +299,7 @@ async def get_all_queues_admin(
         current_user: models.User = Depends(auth.get_current_user)
 ):
     verify_admin(current_user)
-    return await crud.get_queues(db, None, None, 'all', search)
+    return await crud.get_admin_queues(db, None, None, 'all', search)
 
 
 @app.delete("/admin/queues/{queue_id}")

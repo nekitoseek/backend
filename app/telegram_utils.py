@@ -1,4 +1,4 @@
-# telegram_utils.py
+# /app/telegram_utils.py
 import httpx
 
 TELEGRAM_BOT_TOKEN = "7929460692:AAFcGZNcyaqr7mTfkTW-Zc8_G2XjLEseHBI"
@@ -26,6 +26,7 @@ async def notify_telegram_user(telegram_id: str, message: str, queue_id: int = N
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
+            payload["parse_mode"] = "Markdown"
             await client.post(f"{TELEGRAM_API_URL}/sendMessage", json=payload)
         except Exception as e:
             print(f"Ошибка при отправке сообщения Telegram ID {telegram_id}: {e}:")
