@@ -63,11 +63,3 @@ class QueueParticipant(Base):
     position = Column(Integer, nullable=False)
     joined_at = Column(TIMESTAMP, default=datetime.utcnow)
     status = Column(String(10), nullable=False) # 'waiting', 'current', 'done'
-
-class Notification(Base):
-    __tablename__ = "notifications"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    message_text = Column(Text, nullable=False)
-    sent_at = Column(TIMESTAMP, default=datetime.utcnow)
-    status = Column(String(10), nullable=False) # 'sent', 'read', 'error'
