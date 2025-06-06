@@ -432,24 +432,6 @@ async def complete_current_student(db: AsyncSession, queue_id: int, user_id: int
     return {"detail": "Сдача завершена"}
 
 
-# уведомления
-async def send_notification(db: AsyncSession, user_id: int, message_text: str):
-    notification = models.Notification(
-        user_id=user_id,
-        message_text=message_text,
-        status="sent"
-    )
-    db.add(notification)
-    await db.commit()
-
-
-async def get_notifications_for_user(db: AsyncSession, user_id: int):
-    result = await db.execute(
-        select(models.Notification).where(models.Notification.user_id == user_id)
-    )
-    return result.scalars().all()
-
-
 # старт очереди по времени
 async def maybe_start_queue(db: AsyncSession, queue_id: int):
     result = await db.execute(select(models.Queue).where(models.Queue.id == queue_id))

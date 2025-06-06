@@ -214,19 +214,6 @@ async def complete_student_route(
 ):
     return await crud.complete_current_student(db, queue_id, current_user.id)
 
-
-# api для уведомлений (просто с бд пока что)
-@app.get("/notifications", response_model=List[schemas.NotificationOut])
-async def get_my_notifications(
-        db: AsyncSession = Depends(database.get_db),
-        current_user: models.User = Depends(auth.get_current_user)
-):
-    result = await db.execute(
-        select(models.Notification).where(models.Notification.user_id == current_user.id)
-    )
-    return result.scalars().all()
-
-
 @app.get("/groups")
 async def get_groups(
         db: AsyncSession = Depends(database.get_db)
