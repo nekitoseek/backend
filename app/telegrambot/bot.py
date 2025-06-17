@@ -1,4 +1,3 @@
-# /app/telegrambot/bot.py
 import httpx
 from typing import Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
@@ -68,7 +67,7 @@ class TelegramBot:
         tg_id = update.effective_user.id
         text = update.message.text.strip()
 
-        # === Авторизация ===
+        # Авторизация
         if tg_id in self.login_state:
             state = self.login_state[tg_id]
 
@@ -112,7 +111,7 @@ class TelegramBot:
                         del self.login_state[tg_id]
                 return
 
-        # === Обработка после авторизации ===
+        # Обработка после авторизации
         if text == "Мои очереди":
             await self.show_my_queues(update, context)
             return
@@ -265,7 +264,7 @@ class TelegramBot:
                 await update.message.reply_text("Вы не участвуете ни в одной активной или будущей очереди.")
                 return
 
-            self.last_queues[tg_id] = [p["queue"] for p in participated]  # сохраняем для дальнейшего использования
+            self.last_queues[tg_id] = [p["queue"] for p in participated]
 
             msg = "*Ваши записи:*\n\n"
             for i, p in enumerate(participated, 1):
@@ -316,7 +315,6 @@ class TelegramBot:
                 students = res_students.json()
                 active_students = [s for s in students if s["status"] != "done"]
 
-                # ищем позицию пользователя
                 for pos, s in enumerate(active_students, 1):
                     if s["id"] == user_id:
                         await query.edit_message_text(
@@ -324,7 +322,6 @@ class TelegramBot:
                         )
                         return
 
-                # если не нашли в списке (маловероятно)
                 await query.edit_message_text("✅ Вы записались, но позиция не определена.")
             elif r.status_code == 400:
                 await query.edit_message_text("⚠️ Уже записаны или невозможно записаться.")
@@ -367,7 +364,7 @@ class TelegramBot:
             await query.edit_message_text("Ошибка. Возможно, вы не в статусе 'сдаёт'.")
 
 
-# ➤ Запуск
+# Запуск
 if __name__ == "__main__":
     bot = TelegramBot(
         token="7929460692:AAFcGZNcyaqr7mTfkTW-Zc8_G2XjLEseHBI",

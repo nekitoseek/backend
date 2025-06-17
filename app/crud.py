@@ -14,7 +14,6 @@ from app.telegram_utils import notify_telegram_user
 import httpx
 import asyncio
 
-
 # создание пользователя
 async def create_user(db: AsyncSession, user: schemas.UserCreate):
     # проверка, логин или email уже существуют
@@ -37,7 +36,6 @@ async def create_user(db: AsyncSession, user: schemas.UserCreate):
     await db.flush()
 
     db.add(models.StudentGroup(student_id=db_user.id, group_id=user.group_id))
-
     await db.commit()
 
     result = await db.execute(
@@ -55,13 +53,10 @@ async def update_user(db: AsyncSession, user_id: int, data: schemas.UserUpdate):
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
     update_data = data.dict(exclude_unset=True)
-
     if "password" in update_data:
         update_data["password_hash"] = bcrypt.hash(update_data.pop("password"))
-
     for key, value in update_data.items():
         setattr(user, key, value)
-
     if "group_id" in update_data:
         await db.execute(
             delete(models.StudentGroup).where(models.StudentGroup.student_id == user_id)
@@ -71,7 +66,6 @@ async def update_user(db: AsyncSession, user_id: int, data: schemas.UserUpdate):
     await db.commit()
     await db.refresh(user)
     return user
-
 
 # создание очереди
 async def create_queue(db: AsyncSession, queue: schemas.QueueCreate, creator_id: int):
